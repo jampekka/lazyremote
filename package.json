@@ -1,0 +1,11 @@
+{
+  "name": "lazyremote",
+  "version": "0.0.1",
+  "description": "Transparent proxy objects to lazyremote API",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Jami Pekkanen <jami.pekkanen@gmail.com>",
+  "license": "ISC"
+}
