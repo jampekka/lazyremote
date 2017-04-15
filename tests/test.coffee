@@ -17,9 +17,13 @@ Expose = require 'lazyremote-koa'
 PORT = 12342
 api =
 	echo: (value) -> "Echo: #{value}"
+	member: "I'm a member!"
+	getMember: ->
+		return @member
 	callback: (cb) ->
-		#console.log "Callback", cb[R.Internals]
-		return await(cb('Data from server!')) + "Stuff"
+		await(cb('Data from server!')) + "Stuff"
+	higherOrder: (cb) ->
+		return (arg) -> "Arg: #{arg}. Closured callback: #{await cb()}"
 
 
 #app = new Koa()
@@ -27,11 +31,11 @@ api =
 app = Expose api
 server = app.listen PORT, ->
 	remote = await R "ws://localhost:#{PORT}/"
-	#await remote.callback (v) ->
-	#	console.log "From server! #{v}"
-	#console.log String(await remote.echo('fooo!'))
-	console.log await remote.callback (msg) ->
-		console.log "From remote: " + msg
-		return "WOW!"
+	console.log "Simple access:", await remote.member
+	console.log "Simple call:", await remote.echo "From client"
+	console.log "Bound call:", await remote.getMember()
+	await remote.callback (msg) -> console.log "Callback: " + msg
+	console.log "Higher order:", await remote.higherOrder(-> "from client callback")('client arg')
+	
 	R.close remote
 	@close()

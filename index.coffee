@@ -14,15 +14,15 @@ class GetOp
 	handle: (obj) ->
 		if @name.length == 0
 			return obj
-		return obj[@name]
+		v = obj[@name]
+		if typeof(v) == 'function'
+			v = v.bind(obj)
+		return v
 
 class CallOp
-	constructor: (@name, @args) ->
-	handle: (obj) ->
-		if not @name.length
-			return await obj(@args...)
+	constructor: (@args) ->
+	handle: (obj) -> await obj(@args...)
 
-		return await obj[@name].apply(obj, @args)
 
 Schema = (heap) ->
 	types = []
@@ -38,7 +38,7 @@ Schema = (heap) ->
 		kind: 'mapping'
 		resolve: -> true
 		instanceOf: CallOp
-		construct: (v) -> new CallOp v.name, v.args
+		construct: (v) -> new CallOp v.args
 		represent: (v) -> _.assign {}, v
 	
 	T new yaml.Type '!lr-request',
@@ -127,7 +127,6 @@ Remote = (root, socket) ->
 		socket.send encode new RequestOp seq, opcodes
 	
 	
-	#proxies = new Map()
 	heapSeq = 0
 	heapAddresses = new Map()
 	self.getHeapAddress = (v) ->
@@ -141,7 +140,7 @@ Remote = (root, socket) ->
 	
 	self.getProxyForAddress = (id) ->
 		opts = remote: self
-		proxy = LazyProxy_ opts, [(new GetOp 'heap'), (new GetOp id)], '', false, true
+		proxy = LazyProxy_ opts, [(new GetOp 'heap'), (new GetOp id)], false, true
 		return proxy
 		
 
@@ -171,11 +170,11 @@ LazyProxy = (socket, opts={}) ->
 	opts.expose ?= {}
 	socket = await ensureSocket socket
 	opts.remote ?= Remote opts.expose, socket
-	return LazyProxy_ opts, [new GetOp 'root'], '', true
+	return LazyProxy_ opts, [new GetOp 'root'], true
 
 
 
-LazyProxy_ = (opts, opcodes, name, isFirst=false, eagerApply=false) ->
+LazyProxy_ = (opts, opcodes, isFirst=false, eagerApply=false) ->
 	handler =
 		opcodes: opcodes
 		opts: opts
@@ -210,10 +209,10 @@ LazyProxy_ = (opts, opcodes, name, isFirst=false, eagerApply=false) ->
 			if typeof(property) == 'symbol'
 				return target[property]
 			
-			return LazyProxy_ Object.create(@opts), [opcodes..., (new GetOp property)], name
+			return LazyProxy_ Object.create(@opts), [opcodes..., (new GetOp property)]
 
 		apply: (target, thisArg, args) ->
-			proxy = LazyProxy_ Object.create(@opts), [opcodes..., (new CallOp name, args)], name
+			proxy = LazyProxy_ Object.create(@opts), [opcodes..., (new CallOp args)]
 			if eagerApply
 				return proxy[Resolve]
 			return proxy
