@@ -140,7 +140,7 @@ Remote = (root, socket) ->
 	
 	self.getProxyForAddress = (id) ->
 		opts = remote: self
-		proxy = LazyProxy_ opts, [(new GetOp 'heap'), (new GetOp id)], false, true
+		proxy = LazyProxy_ opts, [(new GetOp 'heap'), (new GetOp id)], true
 		return proxy
 		
 
@@ -151,7 +151,12 @@ Remote = (root, socket) ->
 
 ensureSocket = (socket) ->
 	if typeof(socket) == 'string'
-		socket = new WebSocket socket
+		url = urlParse socket
+		if url.protocol == 'http:'
+			url.set 'protocol', 'ws:'
+		if url.protocol == 'https:'
+			url.set 'protocol', 'wss:'
+		socket = new WebSocket url.href
 	if socket.readyState == 1
 		return Promise.resolve socket
 	if socket.readyState == 0
@@ -170,23 +175,18 @@ LazyProxy = (socket, opts={}) ->
 	opts.expose ?= {}
 	socket = await ensureSocket socket
 	opts.remote ?= Remote opts.expose, socket
-	return LazyProxy_ opts, [new GetOp 'root'], true
+
+	return root: LazyProxy_ opts, [new GetOp 'root'], false
 
 
 
-LazyProxy_ = (opts, opcodes, isFirst=false, eagerApply=false) ->
+LazyProxy_ = (opts, opcodes, eagerApply=false) ->
 	handler =
 		opcodes: opcodes
 		opts: opts
 		_fetch: -> opts.remote opcodes
 		
 		get: (target, property, receiver) ->
-			# A huge hack! Without this
-			# the first object is impossible to return!
-			if property == 'then' and isFirst
-				isFirst = false
-				return undefined
-
 			if property == IsProxy
 				return true
 

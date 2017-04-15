@@ -30,7 +30,7 @@ api =
 #app.use(KoaMount '/', Expose api)
 app = Expose api
 server = app.listen PORT, ->
-	remote = await R "ws://localhost:#{PORT}/"
+	remote = (await R "ws://localhost:#{PORT}/").root
 	console.log "Simple access:", await remote.member
 	console.log "Simple call:", await remote.echo "From client"
 	console.log "Bound call:", await remote.getMember()
