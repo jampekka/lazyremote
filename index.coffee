@@ -65,6 +65,15 @@ Schema = (heap) ->
 		represent: (v) ->
 			id: heap.getHeapAddress v
 			props: _.assign {}, v
+	
+	# TODO: Could be nicer
+	T new yaml.Type '!lr-error',
+		kind: 'mapping'
+		resolve: -> true
+		instanceOf: Error
+		construct: (v) -> Error(v.message)
+		represent: (v) ->
+			message: v.message
 
 	# TODO: Extra dangerous!!
 	types.push yaml.DEFAULT_FULL_SCHEMA.explicit...
@@ -74,9 +83,12 @@ Codec = (heap) ->
 	schema = Schema heap
 
 	encode: (obj) ->
-		yaml.dump obj, schema: schema
+		yaml.dump obj,
+			schema: schema
+			skipInvalid: true
 	decode: (obj) ->
-		yaml.load obj, schema: schema
+		yaml.load obj,
+			schema: schema
 
 _Resolve = (result, opcodes=[]) ->
 	for opcode in opcodes
@@ -131,7 +143,7 @@ Remote = (root, socket) ->
 	heapAddresses = new Map()
 	self.getHeapAddress = (v) ->
 		if heapAddresses.has v
-			return heapAddresses v
+			return heapAddresses.get v
 
 		heapSeq += 1
 		root.heap[heapSeq] = v
@@ -187,6 +199,10 @@ LazyProxy_ = (opts, opcodes, eagerApply=false) ->
 		_fetch: -> opts.remote opcodes
 		
 		get: (target, property, receiver) ->
+			if property == 'call'
+				return (thisArg, args...) =>
+					@apply(@, thisArg, args)
+
 			if property == IsProxy
 				return true
 
