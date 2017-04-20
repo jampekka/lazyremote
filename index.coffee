@@ -2,6 +2,7 @@ axios = require 'axios'
 yaml = require 'js-yaml'
 _ = require 'lodash'
 urlParse = require 'url-parse'
+require('promise-resolve-deep')(Promise)
 
 class RequestOp
 	constructor: (@seq, @opcodes) ->
@@ -12,17 +13,22 @@ class ResponseOp
 class GetOp
 	constructor: (@name) ->
 	handle: (obj) ->
+		result = @_handle obj
+		return result
+	_handle: (obj) ->
 		if @name.length == 0
 			return obj
 		v = obj[@name]
-		if typeof(v) == 'function'
-			v = v.bind(obj)
 		return v
 
 class CallOp
-	constructor: (@args) ->
-	handle: (obj) -> await obj(@args...)
+	constructor: (args) ->
+		@args = Array.from args
+	handle: (func, context) ->
+		args = await Promise.resolveDeep @args
+		func.apply context, args
 
+class RemoteError extends Error
 
 Schema = (heap) ->
 	types = []
@@ -38,8 +44,20 @@ Schema = (heap) ->
 		kind: 'mapping'
 		resolve: -> true
 		instanceOf: CallOp
-		construct: (v) -> new CallOp v.args
+		construct: (v) ->
+			new CallOp v.args
 		represent: (v) -> _.assign {}, v
+	
+
+	T new yaml.Type '!lr-proxy',
+		kind: 'mapping'
+		resolve: -> true
+		predicate: (v) -> heap.isMyProxy v
+		represent: (v) ->
+			opcodes: LazyProxy.internals(v).opcodes
+		construct: (v) ->
+			heap.resolveOpcodes v.opcodes
+
 	
 	T new yaml.Type '!lr-request',
 		kind: 'mapping'
@@ -66,12 +84,21 @@ Schema = (heap) ->
 			id: heap.getHeapAddress v
 			props: _.assign {}, v
 	
+	T new yaml.Type '!lr-arguments',
+		kind: 'sequence'
+		resolve: -> true
+		predicate: (v) ->
+			Object.prototype.toString.call(v) == '[object Arguments]'
+		construct: (v) -> v
+		represent: (v) -> Array.from v
+	
 	# TODO: Could be nicer
 	T new yaml.Type '!lr-error',
 		kind: 'mapping'
 		resolve: -> true
 		instanceOf: Error
-		construct: (v) -> Error(v.message)
+		construct: (v) ->
+			new RemoteError(v.message)
 		represent: (v) ->
 			message: v.message
 
@@ -85,17 +112,26 @@ Codec = (heap) ->
 	encode: (obj) ->
 		yaml.dump obj,
 			schema: schema
-			skipInvalid: true
+			#skipInvalid: true
 	decode: (obj) ->
-		yaml.load obj,
-			schema: schema
+		v = yaml.load(obj, schema: schema)
+		v = Promise.resolveDeep v
+		return v
+		
 
+depth = 0
 _Resolve = (result, opcodes=[]) ->
+	depth += 1
+	prev_result = undefined
 	for opcode in opcodes
-		result = await opcode.handle(result)
+		new_result = await opcode.handle(result, prev_result)
+		prev_result = result
+		result = new_result
+
+	depth -= 1
 	return result
 
-Remote = (root, socket) ->
+Remote = (root, socket, name='') ->
 	seq = 0
 	pending = new Map()
 	root =
@@ -104,7 +140,7 @@ Remote = (root, socket) ->
 	handleRequest = (msg) ->
 		return false unless msg instanceof RequestOp
 		try
-			result = await _Resolve(root, msg.opcodes)
+			result = await self.resolveOpcodes(msg.opcodes)
 			socket.send encode new ResponseOp msg.seq, result, false
 		catch error
 			socket.send encode new ResponseOp msg.seq, error, true
@@ -125,7 +161,7 @@ Remote = (root, socket) ->
 
 	socket.onmessage = (event) ->
 		handled = 0
-		msg = decode event.data
+		msg = await decode event.data
 		handled += await handleRequest msg
 		handled += await handleResponse msg
 		if not handled
@@ -154,8 +190,16 @@ Remote = (root, socket) ->
 		opts = remote: self
 		proxy = LazyProxy_ opts, [(new GetOp 'heap'), (new GetOp id)], true
 		return proxy
-		
+	
+	self.resolveOpcodes = (opcodes) ->
+		result = await _Resolve root, opcodes
+		return result
 
+	self.isMyProxy = (obj) ->
+		return false unless LazyProxy.isProxy obj
+		return LazyProxy.internals(obj).opts.remote == self
+	
+	self.remote_name = name
 	{encode, decode} = Codec self
 	self.close = -> socket.close()
 	return self
@@ -183,13 +227,26 @@ Close = Symbol('close')
 IsProxy = Symbol('isProxy')
 
 LazyProxy = (socket, opts={}) ->
-	opts.autopromise ?= true
+	opts.autopromise ?= false
 	opts.expose ?= {}
 	socket = await ensureSocket socket
-	opts.remote ?= Remote opts.expose, socket
+	opts.remote ?= Remote opts.expose, socket, opts.name
 
 	return root: LazyProxy_ opts, [new GetOp 'root'], false
 
+util = require 'util'
+if util.inspect.defaultOptions
+	util.inspect.defaultOptions.customInspect = false
+
+opcode_path = (opcodes) ->
+	p = ""
+	for code in opcodes
+		if code instanceof GetOp
+			p += ".#{code.name}"
+		else if code instanceof CallOp
+			args = typeof (code.args)
+			p += "(#{args})"
+	return p
 
 
 LazyProxy_ = (opts, opcodes, eagerApply=false) ->
@@ -202,12 +259,22 @@ LazyProxy_ = (opts, opcodes, eagerApply=false) ->
 			if property == 'call'
 				return (thisArg, args...) =>
 					@apply(@, thisArg, args)
+			
+			if property == 'apply'
+				return (thisArg, args...) =>
+					@apply(@, thisArg, args)
+
+			if property == '_isBuffer'
+				return false
+
+			if property == 'then'
+				return
 
 			if property == IsProxy
 				return true
 
 			if property == Symbol.toPrimitive
-				return -> "[LazyProxy to #{opcodes}]"
+				return -> "[LazyProxy to #{opcode_path opcodes}]"
 			
 			if property == Internals
 				return @
@@ -225,20 +292,27 @@ LazyProxy_ = (opts, opcodes, eagerApply=false) ->
 			if typeof(property) == 'symbol'
 				return target[property]
 			
-			return LazyProxy_ Object.create(@opts), [opcodes..., (new GetOp property)]
+			return LazyProxy_ Object.create(@opts), [opcodes..., (new GetOp property)], eagerApply
 
 		apply: (target, thisArg, args) ->
-			proxy = LazyProxy_ Object.create(@opts), [opcodes..., (new CallOp args)]
+			proxy = LazyProxy_ Object.create(@opts), [opcodes..., (new CallOp Array.from(args))], eagerApply
 			if eagerApply
-				return proxy[Resolve]
+				return LazyProxy.resolve proxy
 			return proxy
 	new Proxy (->), handler
 
 LazyProxy.Resolve = Resolve
 LazyProxy.Internals = Internals
 LazyProxy.Close = Close
-LazyProxy.resolve = (p) -> return p[Resolve]
-LazyProxy.close = (p) -> return p[Close]
+LazyProxy.IsProxy = IsProxy
+LazyProxy.resolve = (p) -> Reflect.get p, Resolve
+LazyProxy.close = (p) -> Reflect.get p, Close
+LazyProxy.isProxy = (p) ->
+	try
+		return (Reflect.get p, IsProxy)?
+	catch
+		return false
+LazyProxy.internals = (p) -> Reflect.get p, Internals
 
 module.exports = LazyProxy
 
