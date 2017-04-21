@@ -6,7 +6,7 @@
   "scripts": {
     "build": "coffee -c index.coffee",
     "test": "mocha --compilers coffee:coffeescript/register --full-trace",
-    "browser-test": "webpack -d"
+    "browser-test": "webpack -d --watch"
   },
   "author": "Jami Pekkanen <jami.pekkanen@gmail.com>",
   "license": "ISC",

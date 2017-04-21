@@ -129,7 +129,9 @@ describe 'Supports', ->
 			@local.callback (v) ->
 				accept(v)
 			return
-		assert.equal (await remote_promise), (await local_promise)
+		remote_result = await remote_promise
+		local_result = await local_promise
+		assert.equal remote_result, local_result
 	
 	###
 	it "Late callback", ->
@@ -178,5 +180,7 @@ describe 'Supports', ->
 		catch exception
 		assert.equal exception, "Shouldn't do this!"
 	it "Lodash", ->
-		result = await R.resolve @remote.callback @remote.lodash.throttle -> 'They called back!'
-		assert.equal result, 'They called back!'
+		localResult = await @local.callback @local.lodash.throttle (arg) -> arg
+		result = await R.resolve @remote.callback @remote.lodash.throttle (arg) -> arg
+		console.log localResult
+		assert.equal result, localResult

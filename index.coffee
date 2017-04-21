@@ -84,14 +84,6 @@ Schema = (heap) ->
 			id: heap.getHeapAddress v
 			props: _.assign {}, v
 	
-	T new yaml.Type '!lr-arguments',
-		kind: 'sequence'
-		resolve: -> true
-		predicate: (v) ->
-			Object.prototype.toString.call(v) == '[object Arguments]'
-		construct: (v) -> v
-		represent: (v) -> Array.from v
-	
 	# TODO: Could be nicer
 	T new yaml.Type '!lr-error',
 		kind: 'mapping'
@@ -248,7 +240,6 @@ opcode_path = (opcodes) ->
 			p += "(#{args})"
 	return p
 
-
 LazyProxy_ = (opts, opcodes, eagerApply=false) ->
 	handler =
 		opcodes: opcodes
@@ -261,7 +252,7 @@ LazyProxy_ = (opts, opcodes, eagerApply=false) ->
 					@apply(@, thisArg, args)
 			
 			if property == 'apply'
-				return (thisArg, args...) =>
+				return (thisArg, args) =>
 					@apply(@, thisArg, args)
 
 			if property == '_isBuffer'
@@ -295,7 +286,7 @@ LazyProxy_ = (opts, opcodes, eagerApply=false) ->
 			return LazyProxy_ Object.create(@opts), [opcodes..., (new GetOp property)], eagerApply
 
 		apply: (target, thisArg, args) ->
-			proxy = LazyProxy_ Object.create(@opts), [opcodes..., (new CallOp Array.from(args))], eagerApply
+			proxy = LazyProxy_ Object.create(@opts), [opcodes..., (new CallOp args)], eagerApply
 			if eagerApply
 				return LazyProxy.resolve proxy
 			return proxy
