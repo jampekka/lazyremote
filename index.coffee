@@ -2,7 +2,7 @@ axios = require 'axios'
 yaml = require 'js-yaml'
 _ = require 'lodash'
 urlParse = require 'url-parse'
-require('promise-resolve-deep')(Promise)
+DeepResolver = require('promise-resolve-deep')
 
 class RequestOp
 	constructor: (@seq, @opcodes) ->
@@ -92,6 +92,7 @@ Schema = (heap) ->
 		construct: (v) ->
 			new RemoteError(v.message)
 		represent: (v) ->
+			console.warn "Remote error", v
 			message: v.message
 
 	# TODO: Extra dangerous!!
@@ -104,7 +105,7 @@ Codec = (heap) ->
 	encode: (obj) ->
 		yaml.dump obj,
 			schema: schema
-			#skipInvalid: true
+			skipInvalid: true
 	decode: (obj) ->
 		v = yaml.load(obj, schema: schema)
 		v = Promise.resolveDeep v
@@ -190,6 +191,8 @@ Remote = (root, socket, name='') ->
 	self.isMyProxy = (obj) ->
 		return false unless LazyProxy.isProxy obj
 		return LazyProxy.internals(obj).opts.remote == self
+
+	self.socket = socket
 	
 	self.remote_name = name
 	{encode, decode} = Codec self
@@ -219,6 +222,7 @@ Close = Symbol('close')
 IsProxy = Symbol('isProxy')
 
 LazyProxy = (socket, opts={}) ->
+	DeepResolver(Promise)
 	opts.autopromise ?= false
 	opts.expose ?= {}
 	socket = await ensureSocket socket
@@ -268,7 +272,7 @@ LazyProxy_ = (opts, opcodes, eagerApply=false) ->
 				return -> "[LazyProxy to #{opcode_path opcodes}]"
 			
 			if property == Internals
-				return @
+				return handler
 
 			if property == Resolve
 				return @_fetch()
