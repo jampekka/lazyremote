@@ -76,7 +76,7 @@ Schema = (heap) ->
 	T new yaml.Type '!lr-function',
 		kind: 'mapping'
 		resolve: -> true
-		predicate: (v) -> typeof(v) == 'function'
+		predicate: (v) -> typeof(v) == 'function' and not v[Purejs]
 		construct: (v) ->
 			proxy = heap.getProxyForAddress v.id
 			return proxy
@@ -105,7 +105,7 @@ Codec = (heap) ->
 	encode: (obj) ->
 		yaml.dump obj,
 			schema: schema
-			skipInvalid: true
+			#skipInvalid: true
 	decode: (obj) ->
 		v = yaml.load(obj, schema: schema)
 		v = Promise.resolveDeep v
@@ -220,6 +220,7 @@ Resolve = Symbol('resolve')
 Internals = Symbol('internals')
 Close = Symbol('close')
 IsProxy = Symbol('isProxy')
+Purejs = Symbol('purejs')
 
 LazyProxy = (socket, opts={}) ->
 	DeepResolver(Promise)
@@ -308,6 +309,10 @@ LazyProxy.isProxy = (p) ->
 	catch
 		return false
 LazyProxy.internals = (p) -> Reflect.get p, Internals
+LazyProxy.purejs = (f) ->
+	# TODO: Should do a proto-clone!
+	f[Purejs] = true
+	return f
 
 module.exports = LazyProxy
 

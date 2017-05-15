@@ -66,7 +66,6 @@ describe 'Supports', ->
 		loopback: (cb) ->
 			await(cb('Data from server!')) + "Stuff"
 		higherOrder: (cb) ->
-			#console.log cb
 			return (arg) -> "Arg: #{arg}. Closured callback: #{cb()}"
 		returnError: ->
 			return Error("Foo")
@@ -77,6 +76,11 @@ describe 'Supports', ->
 			throw new ACustomError('just an error')
 
 		lodash: lodash
+		isProxy: (f) ->
+			console.log "Stuff", f
+			R.isProxy f
+		getReturn: (f) -> f()
+
 	nested = ->
 	nested.once = (f) ->
 		called = false
@@ -182,5 +186,13 @@ describe 'Supports', ->
 	it "Lodash", ->
 		localResult = await @local.callback @local.lodash.throttle (arg) -> arg
 		result = await R.resolve @remote.callback @remote.lodash.throttle (arg) -> arg
-		console.log localResult
 		assert.equal result, localResult
+	it "Raw functions", ->
+		cb = -> 'from callback'
+
+		assert await R.resolve @remote.isProxy cb
+		assert.equal cb(), await R.resolve @remote.getReturn cb
+		
+		assert not await R.resolve @remote.isProxy R.purejs cb
+		assert.equal cb(), await R.resolve @remote.getReturn R.purejs cb
+
